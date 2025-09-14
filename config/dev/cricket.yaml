@@ -1,0 +1,222 @@
+silver.matches: >
+  CREATE TABLE IF NOT EXISTS silver.matches (
+    match_id TEXT PRIMARY KEY,
+    event JSONB,
+    match_number TEXT,
+    dates DATE[],                         -- Array of dates
+    match_type TEXT,
+    officials JSONB,                      -- Dictionary with list values
+    outcome JSONB,                       -- Dictionary field
+    overs INTEGER,
+    players JSONB,                      -- Dictionary with list values
+    match_type_number TEXT,
+    season TEXT,
+    team_type TEXT,
+    toss_winner TEXT,
+    toss_winner_decision TEXT,
+    venue TEXT,
+    city TEXT,
+    player_of_match TEXT[],
+    gender TEXT,
+    source TEXT
+    )
+silver.innings_deliveries: >
+  CREATE TABLE IF NOT EXISTS silver.innings_deliveries (
+    match_id TEXT,
+    over_num INTEGER,
+    ball_num INTEGER,
+    inning_num INTEGER,
+    batter TEXT,
+    bowler TEXT,
+    runs JSONB,
+    extras JSONB,
+    wickets JSONB,
+    source TEXT
+    )
+silver.files_processed: >
+  CREATE TABLE IF NOT EXISTS silver.files_processed (
+    file_name TEXT,
+    status  TEXT,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+gold.fielding_stats: >
+  CREATE TABLE IF NOT EXISTS gold.fielding_stats (
+    match_id TEXT,
+    wicket_type TEXT,
+    fielders TEXT,
+    player_out TEXT
+    )
+gold.bowling_stats: >
+  CREATE TABLE IF NOT EXISTS gold.bowling_stats (
+    match_id TEXT,
+    bowler  TEXT,
+    num_balls_delivered INTEGER,
+    runs INTEGER,
+    num_boundaries INTEGER,
+    num_six INTEGER,
+    byes INTEGER,
+    legbyes INTEGER,
+    noballs INTEGER,
+    wides INTEGER,
+    num_wickets INTEGER
+    )
+gold.batting_stats: >
+  CREATE TABLE IF NOT EXISTS gold.batting_stats (
+    match_id TEXT,
+    batter TEXT,
+    bowler TEXT,
+    num_balls_played INTEGER,
+    runs INTEGER,
+    num_boundaries INTEGER,
+    num_six INTEGER
+    )
+gold.match_info: >
+  CREATE TABLE IF NOT EXISTS gold.match_info (
+    match_id TEXT,
+    dates DATE[],
+    team_1 TEXT,
+    team_2 TEXT,
+    team_1_players TEXT[],
+    team_2_players TEXT[],
+    event_name TEXT,
+    match_type TEXT,
+    winning_team TEXT,
+    won_by_wickets INTEGER,
+    won_by_runs INTEGER,
+    team_type TEXT,
+    toss_winner	TEXT,
+    toss_winner_decision TEXT,
+    venue TEXT,
+    city TEXT,
+    gender TEXT,
+    player_of_match TEXT[]
+    )
+gold.fielding_stats_query: >
+  SELECT match_id,
+         wickets_converted->>'kind' wicket_type,
+         NULL as fielders,
+         wickets_converted->>'player_out' as player_out
+  from   silver.innings_deliveries,
+  LATERAL jsonb_array_elements(wickets) as wickets_converted
+  where wickets_converted->>'kind' IN ('lbw', 'bowled')
+  and   match_id='{match_id}'
+  union all
+  SELECT match_id,
+         wickets_converted->>'kind' wicket_type,
+         fielders_new->'name' as fielders,
+         wickets_converted->>'player_out' as player_out
+  from   silver.innings_deliveries,
+  LATERAL jsonb_array_elements(wickets) as wickets_converted,
+  LATERAL jsonb_array_elements(wickets_converted->'fielders') fielders_new
+  where   match_id='{match_id}'
+gold.bowling_stats_query: >
+  with wickets_info as (
+      SELECT match_id, bowler,
+             SUM(
+             CASE WHEN wickets_converted->>'kind' IN ('caught', 'bowled', 'lbw')
+             THEN 1
+             ELSE 0 END) AS num_wickets
+      from   silver.innings_deliveries,
+      LATERAL jsonb_array_elements(wickets) as wickets_converted
+      where  match_id='{match_id}'
+    group by 1,2
+    )
+    select id.match_id,
+           id.bowler,
+           count(*) num_balls_delivered,
+           COALESCE(sum((runs->>'batter')::integer), 0) as runs,
+           sum(case when (runs->>'batter')::integer=4
+           then 1
+           else 0 end) num_boundaries,
+           sum(case when (runs->>'batter')::integer=6
+           then 1
+           else 0 end) num_six,
+           COALESCE(sum((extras->>'byes')::integer), 0) as byes,
+           COALESCE(sum((extras->>'legbyes')::integer), 0) as legbyes,
+           COALESCE(sum((extras->>'noballs')::integer), 0) as noballs,
+           COALESCE(sum((extras->>'wides')::integer), 0) as wides,
+           max(num_wickets) as num_wickets
+    from   silver.innings_deliveries id
+    LEFT JOIN   wickets_info wi
+    ON     id.match_id=wi.match_id
+    AND    id.bowler=wi.bowler
+    where  id.match_id='{match_id}'
+    group by 1, 2
+gold.batting_stats_query: >
+  select match_id,
+         batter,
+         bowler,
+         count(*) num_balls_played,
+         sum((runs->>'batter')::integer) as runs,
+         sum(case when (runs->>'batter')::integer=4
+         then 1
+         else 0 end) num_boundaries,
+         sum(case when (runs->>'batter')::integer=6
+         then 1
+         else 0 end) num_six
+  from   silver.innings_deliveries
+  where  match_id = '{match_id}'
+  group by 1, 2, 3
+gold.match_info_query: >
+  with teams as (
+  select match_id, 
+         jsonb_object_keys(players) as teams
+  from silver.matches
+  ),
+  teams_arr as (
+  select match_id,
+         array_agg(teams) as t
+  from   teams
+  group by match_id
+  ),
+  match_info as (
+  select match_id,
+         dates,
+         event->'name' as event_name,
+         match_type,
+         CASE WHEN outcome->'winner' IS NULL
+         THEN outcome->>'result' 
+         ELSE outcome->>'winner' END as winning_team,
+         outcome->'by' as won_by,
+         team_type,
+         toss_winner,
+         toss_winner_decision,
+         venue,
+         city,
+         gender,
+         player_of_match,
+         players
+  from   silver.matches
+      )
+  select mi.match_id as match_id,
+         dates,
+         ta.t[1] as team_1,
+         ta.t[2] as team_2,
+         mi.players->ta.t[1] team_1_players,
+         mi.players->ta.t[2] team_2_players,
+         mi.event_name as event_name,
+         mi.match_type as match_type,
+         mi.winning_team as winning_team,
+         CASE WHEN mi.won_by->'wickets' IS NOT NULL
+         THEN mi.won_by->'wickets'
+         ELSE NULL END as won_by_wickets,
+         CASE WHEN mi.won_by->'runs' IS NOT NULL
+         THEN mi.won_by->'runs'
+         ELSE NULL END as won_by_runs,
+         mi.team_type as team_type,
+         mi.toss_winner as toss_winner,
+         mi.toss_winner_decision toss_winner_decision,
+         mi.venue as venue,
+         mi.city as city,
+         mi.gender as gender,
+         mi.player_of_match as player_of_match
+  from teams_arr ta
+  join match_info mi
+  on ta.match_id=mi.match_id
+gold.stats_processed: >
+  CREATE TABLE IF NOT EXISTS gold.stats_processed (
+    process_name TEXT,
+    match_id TEXT,
+    status  TEXT,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
