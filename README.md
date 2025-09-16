@@ -67,6 +67,152 @@ python sports_analysis/cricket/etl/run.py –load_silver T20-ODI
 python sports_analysis/cricket/etl/run.py –load_gold batting_stats
 ```
 
+## Database Tables and Descriptions :floppy_disk:
+
+### silver.files_processed
+Tracks the processing status of data files in the silver layer.
+
+| Column       | Type                       | Description                          |
+|--------------|----------------------------|------------------------------------|
+| file_name    | text                       | Name or path of the processed file |
+| status       | text                       | Processing status (e.g., STARTED, FINISHED, FAILED) |
+| processed_at | timestamp without time zone| Timestamp when the file was processed (defaults to current timestamp) |
+
+---
+
+### silver.innings_deliveries
+Contains ball-by-ball delivery data for each innings in matches.
+
+| Column     | Type    | Description                           |
+|------------|---------|-------------------------------------|
+| match_id   | text    | Unique identifier of the match       |
+| over_num   | integer | Over number in the innings            |
+| ball_num   | integer | Ball number within the over           |
+| inning_num | integer | Innings number (1 or 2, etc.)        |
+| batter     | text    | Player batting on this delivery       |
+| bowler     | text    | Player bowling on this delivery       |
+| runs       | jsonb   | Runs scored on this delivery           |
+| extras     | jsonb   | Extras such as wides, byes on delivery|
+| wickets    | jsonb   | Wickets taken on this delivery         |
+| source     | text    | Source file path for provenance        |
+
+Indexes on `match_id` improve query performance for match-based lookups.
+
+---
+
+### silver.matches
+Stores match-level metadata and summary information.
+
+| Column              | Type    | Description                             |
+|---------------------|---------|---------------------------------------|
+| match_id            | text    | Unique match identifier (primary key) |
+| event               | jsonb   | Event details such as tournament        |
+| match_number        | text    | Match number or identifier              |
+| dates               | date[]  | Dates on which the match was played     |
+| match_type          | text    | Type of match (Test, ODI, T20, etc.)   |
+| officials           | jsonb   | Match officials details                 |
+| outcome             | jsonb   | Result details                         |
+| overs               | integer | Number of overs (if limited overs)     |
+| players             | jsonb   | List of participating players           |
+| match_type_number   | text    | Numeric or string type indicator         |
+| season              | text    | Season or year                          |
+| team_type           | text    | Format type of competing teams          |
+| toss_winner         | text    | Team that won the toss                   |
+| toss_winner_decision| text    | Decision after toss (bat/field)          |
+| venue               | text    | Match venue                             |
+| city                | text    | City of match                           |
+| player_of_match     | text[]  | List of player(s) awarded player of match|
+| gender              | text    | Gender category (male/female)           |
+| source              | text    | Source file path                        |
+
+Primary key on `match_id` and indexes for fast access by match.
+
+---
+
+### gold.batting_stats
+Aggregated batting statistics per match and player.
+
+| Column          | Type    | Description                     |
+|-----------------|---------|---------------------------------|
+| match_id        | text    | Match identifier                |
+| batter          | text    | Player batting                  |
+| bowler          | text    | Bowler faced                   |
+| num_balls_played| integer | Number of balls faced           |
+| runs            | integer | Runs scored                     |
+| num_boundaries  | integer | Number of boundaries (4s)       |
+| num_six         | integer | Number of sixes                 |
+
+---
+
+### gold.bowling_stats
+Aggregated bowling statistics per match and player.
+
+| Column            | Type    | Description                    |
+|-------------------|---------|-------------------------------|
+| match_id          | text    | Match identifier               |
+| bowler            | text    | Player bowling                 |
+| num_balls_delivered| integer | Number of balls bowled         |
+| runs              | integer | Runs conceded                  |
+| num_boundaries    | integer | Boundaries conceded             |
+| num_six           | integer | Sixes conceded                 |
+| byes              | integer | Runs conceded as byes          |
+| legbyes           | integer | Runs conceded as legbyes       |
+| noballs           | integer | No balls bowled                |
+| wides             | integer | Wides bowled                   |
+| num_wickets       | integer | Wickets taken                  |
+
+---
+
+### gold.fielding_stats
+Fielding and dismissal details per match.
+
+| Column      | Type | Description                   |
+|-------------|------|-------------------------------|
+| match_id    | text | Match identifier              |
+| wicket_type | text | Type of wicket (e.g., catch)  |
+| fielders    | text | Names of fielders involved    |
+| player_out  | text | Player dismissed               |
+
+---
+
+### gold.match_info
+Summary and metadata at the gold layer for each match.
+
+| Column             | Type    | Description                     |
+|--------------------|---------|---------------------------------|
+| match_id           | text    | Match identifier                |
+| dates              | date[]  | Match dates                    |
+| team_1             | text    | First competing team            |
+| team_2             | text    | Second competing team           |
+| team_1_players     | text[]  | Players from team 1             |
+| team_2_players     | text[]  | Players from team 2             |
+| event_name         | text    | Event or tournament name       |
+| match_type         | text    | Type of match (Test, ODI, etc.)|
+| winning_team       | text    | Winning team                   |
+| won_by_wickets     | integer | Margin by wickets won          |
+| won_by_runs        | integer | Margin by runs won             |
+| team_type          | text    | Team type                      |
+| toss_winner        | text    | Toss winner                   |
+| toss_winner_decision| text    | Decision after toss (bat/field)|
+| venue              | text    | Venue of the match             |
+| city               | text    | City of the match             |
+| gender             | text    | Gender category (male/female)  |
+| player_of_match    | text[]  | List of player(s) of the match |
+
+---
+
+### gold.stats_processed
+Tracks status of gold layer processing per match and process type.
+
+| Column       | Type                       | Description                       |
+|--------------|----------------------------|---------------------------------|
+| process_name | text                       | Name of the process (e.g., batting_stats) |
+| match_id     | text                       | Match identifier                |
+| status       | text                       | Processing status (e.g., STARTED, FINISHED, FAILED) |
+| processed_at | timestamp without time zone| Timestamp of last processed update (default is current timestamp) |
+
+---
+
 
 ---
 
